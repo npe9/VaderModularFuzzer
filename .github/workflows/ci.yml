@@ -5,6 +5,7 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build-and-test:
@@ -18,6 +19,7 @@ jobs:
       run: |
         set -e
         docker build -t vader-modular-fuzzer -f dockerfiles/Dockerfile.u22 .
+        mkdir -p fuzz_output
         docker run --privileged -v $(pwd):/app -v $(pwd)/fuzz_output:/app/fuzz_output vader-modular-fuzzer /bin/bash -c "
           set -e
           cd /app
@@ -29,6 +31,14 @@ jobs:
           echo core > /proc/sys/kernel/core_pattern
           ctest --output-on-failure
         "
+
+    - name: Verify Fuzzing Results Directory
+      run: |
+        ls -la fuzz_output/
+        if [ ! -d "fuzz_output" ]; then
+          echo "Error: fuzz_output directory does not exist"
+          exit 1
+        fi
 
     - name: Archive Fuzzing Test Results
       uses: actions/upload-artifact@v4
