@@ -19,18 +19,21 @@ jobs:
 
     - name: Build and test with Docker
       run: |
+        # Build the Docker image
         docker build -t vmf-test -f dockerfiles/Dockerfile.u22 .
+        
+        # Run unit tests
         docker run --rm vmf-test bash -c "cd /usr/local/src/vmf/build && ctest --output-on-failure"
-
-    - name: Fuzz test binaries
-      run: |
+        
+        # Run fuzzing tests
         docker run --rm -v $(pwd):/workdir vmf-test bash -c "
           cd /workdir &&
-          mkdir -p fuzz_output &&
-          # Fuzz haystack with stdin input
+          # Build test binaries
+          cd test/haystackSUT && make &&
+          cd ../magicBytesSUT && make &&
+          cd ../.. &&
+          # Run fuzzing tests
           vmf fuzz -c test/haystackSUT/haystack_stdin.yaml -o fuzz_output/haystack_stdin &&
-          # Fuzz haystack with file input
           vmf fuzz -c test/haystackSUT/haystack_file.yaml -o fuzz_output/haystack_file &&
-          # Fuzz magicbytes
           vmf fuzz -c test/magicBytesSUT/magicbytes.yaml -o fuzz_output/magicbytes
         " 
