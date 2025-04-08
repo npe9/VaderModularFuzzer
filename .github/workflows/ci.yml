@@ -27,6 +27,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
+          file: ./dockerfiles/Dockerfile.u22
           push: true
           tags: ghcr.io/npe9/vadermodularfuzzer:latest
           cache-from: type=gha
