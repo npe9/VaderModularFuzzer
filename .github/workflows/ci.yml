@@ -10,7 +10,7 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: vadermodularfuzzer
-  TEST_TIMEOUT: 600  # 10 minutes
+  TEST_TIMEOUT: 600  # 10 minutes - Timeout for running test suite with CTest
 
 jobs:
   build-and-test:
