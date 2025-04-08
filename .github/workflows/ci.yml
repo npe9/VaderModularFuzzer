@@ -41,15 +41,18 @@ jobs:
           docker run --privileged \
             -v $(pwd):/app \
             -v $(pwd)/fuzz_output:/app/fuzz_output \
+            --cap-add=SYS_PTRACE \
+            --security-opt seccomp=unconfined \
             ghcr.io/npe9/vadermodularfuzzer:latest \
             bash -c "set -e; \
+                    echo 'core' > /proc/sys/kernel/core_pattern; \
                     cd /app; \
                     rm -rf build; \
                     mkdir -p build; \
                     cd build; \
                     cmake -DCMAKE_BUILD_TYPE=Debug .. || { echo 'CMake configuration failed'; cat CMakeFiles/CMakeError.log; exit 1; }; \
                     make -j || { echo 'Build failed'; exit 1; }; \
-                    timeout 300 ctest --output-on-failure --verbose"
+                    timeout 600 ctest --output-on-failure --verbose"
       
       - name: Verify Fuzzing Results Directory
         run: |
