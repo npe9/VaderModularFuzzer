@@ -41,7 +41,7 @@ jobs:
           docker run --privileged \
             -v $(pwd):/app \
             -v $(pwd)/fuzz_output:/app/fuzz_output \
-            ghcr.io/${{ github.repository }}:latest \
+            ghcr.io/npe9/vadermodularfuzzer:latest \
             bash -c "set -e; \
                     cd /app; \
                     rm -rf build; \
