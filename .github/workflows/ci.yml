@@ -11,6 +11,7 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: vadermodularfuzzer
   TEST_TIMEOUT: 600  # 10 minutes - Timeout for running test suite with CTest
+  FUZZ_TIMEOUT: 300  # 5 minutes - Timeout for each fuzzing test
 
 jobs:
   build-and-test:
@@ -57,10 +58,12 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
       
-      - name: Create test output directory
-        run: mkdir -p fuzz_output
+      - name: Create test output directories
+        run: |
+          mkdir -p fuzz_output/magicbytes
+          mkdir -p fuzz_output/haystack
       
-      - name: Run tests
+      - name: Run unit tests
         run: |
           docker run --privileged \
             -v $(pwd):/app \
@@ -77,6 +80,29 @@ jobs:
                     cmake -DCMAKE_BUILD_TYPE=Debug .. || { echo 'CMake configuration failed'; cat CMakeFiles/CMakeError.log; exit 1; } && \
                     make -j$(nproc) || { echo 'Build failed'; exit 1; } && \
                     timeout ${{ env.TEST_TIMEOUT }} ctest --output-on-failure --verbose"
+
+      - name: Run system tests
+        run: |
+          docker run --privileged \
+            -v $(pwd):/app \
+            -v $(pwd)/fuzz_output:/app/fuzz_output \
+            --cap-add=SYS_PTRACE \
+            --security-opt seccomp=unconfined \
+            ${{ fromJSON(steps.meta.outputs.json).tags[0] }} \
+            bash -c "set -e; \
+                    cd /app && \
+                    cd test && \
+                    # Build magicbytes SUT
+                    cd magicBytesSUT && \
+                    make clean && make && \
+                    cd .. && \
+                    # Build haystack SUT
+                    cd haystackSUT && \
+                    make clean && make && \
+                    cd .. && \
+                    # Run fuzzing tests
+                    timeout ${{ env.FUZZ_TIMEOUT }} python3 -m vmf -c config/basicModules.yaml -i magicBytesSUT/inputs -o fuzz_output/magicbytes magicBytesSUT/magicbytes && \
+                    timeout ${{ env.FUZZ_TIMEOUT }} python3 -m vmf -c config/basicModules.yaml -i haystackSUT/inputs -o fuzz_output/haystack haystackSUT/haystack"
       
       - name: Verify test results
         run: |
@@ -84,11 +110,25 @@ jobs:
             echo "Error: Test output directory not found"
             exit 1
           fi
+          
+          # Check for crashes in magicbytes
+          if [ -d "fuzz_output/magicbytes/crashes" ] && [ "$(ls -A fuzz_output/magicbytes/crashes)" ]; then
+            echo "Found crashes in magicbytes test!"
+            ls -la fuzz_output/magicbytes/crashes
+          fi
+          
+          # Check for crashes in haystack
+          if [ -d "fuzz_output/haystack/crashes" ] && [ "$(ls -A fuzz_output/haystack/crashes)" ]; then
+            echo "Found crashes in haystack test!"
+            ls -la fuzz_output/haystack/crashes
+          fi
       
       - name: Upload test artifacts
         uses: actions/upload-artifact@v4
         with:
           name: test-results-${{ github.sha }}
-          path: fuzz_output/
+          path: |
+            fuzz_output/magicbytes/
+            fuzz_output/haystack/
           retention-days: 5
           if-no-files-found: warn
