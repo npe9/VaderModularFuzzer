@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - fix/workflow-trigger
+      - fix/workflow-trigger  # Branch for testing CD workflow
     tags:
       - 'v*'
   workflow_dispatch:
@@ -32,12 +32,18 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
+    - name: Set sanitized tag
+      id: set_tag
+      run: |
+        SANITIZED_TAG=$(echo "${{ github.ref_name }}" | tr '/' '-')
+        echo "tag=$SANITIZED_TAG" >> $GITHUB_OUTPUT
+
     - name: Build and push Docker image
       uses: docker/build-push-action@v5
       with:
         context: .
         push: true
-        tags: ghcr.io/${{ github.repository_owner }}/vadermodularfuzzer:${{ github.ref_name }}
+        tags: ghcr.io/${{ github.repository_owner }}/vadermodularfuzzer:${{ steps.set_tag.outputs.tag }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
         build-args: |
