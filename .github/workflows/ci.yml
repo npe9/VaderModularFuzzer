@@ -8,61 +8,53 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-and-test:
-    name: Build and Test Vader Modular Fuzzer
+  test:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout Repository
-      uses: actions/checkout@v3
-
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
-
-    - name: Login to GitHub Container Registry
-      uses: docker/login-action@v3
-      with:
-        registry: ghcr.io
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Build and push Docker image
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        file: dockerfiles/Dockerfile.u22
-        push: true
-        tags: ghcr.io/${{ github.repository }}:latest
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
-
-    - name: Run Tests
-      run: |
-        set -e
-        mkdir -p fuzz_output
-        docker run --privileged -v $(pwd):/app -v $(pwd)/fuzz_output:/app/fuzz_output ghcr.io/${{ github.repository }}:latest /bin/bash -c "
-          set -e
-          cd /app
-          mkdir -p fuzz_output
-          mkdir -p build
-          cd build
-          cmake -DCMAKE_BUILD_TYPE=Debug ..
-          make -j$(nproc)
-          echo core > /proc/sys/kernel/core_pattern
-          ctest --output-on-failure
-        "
-
-    - name: Verify Fuzzing Results Directory
-      run: |
-        ls -la fuzz_output/
-        if [ ! -d "fuzz_output" ]; then
-          echo "Error: fuzz_output directory does not exist"
-          exit 1
-        fi
-
-    - name: Archive Fuzzing Test Results
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: fuzzing-results
-        path: fuzz_output/
-        retention-days: 7 
+      - uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ghcr.io/${{ github.repository }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      
+      - name: Create fuzz_output directory
+        run: mkdir -p fuzz_output
+      
+      - name: Run tests with Docker
+        run: |
+          docker run --privileged \
+            -v $(pwd)/fuzz_output:/fuzz_output \
+            -e VMF_TEST_TIMEOUT=300 \
+            ghcr.io/${{ github.repository }}:latest \
+            bash -c "cd /usr/local/test && cmake -B build -S . && cd build && make -j && ctest --output-on-failure"
+      
+      - name: Verify Fuzzing Results Directory
+        run: |
+          if [ ! -d "fuzz_output" ]; then
+            echo "Error: fuzz_output directory does not exist"
+            exit 1
+          fi
+          echo "Contents of fuzz_output directory:"
+          ls -la fuzz_output
+      
+      - name: Upload fuzzing results
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-results
+          path: fuzz_output/
+          if-no-files-found: warn 
