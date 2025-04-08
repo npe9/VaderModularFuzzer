@@ -1,4 +1,4 @@
-name: VMF CI/CD Pipeline
+name: CI
 
 on:
   push:
@@ -7,23 +7,44 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: vadermodularfuzzer
+  TEST_TIMEOUT: 600  # 10 minutes
+
 jobs:
   build-and-test:
-    name: Build and Test VMF
+    name: Build and Test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
       
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       
-      - name: Login to GitHub Container Registry
+      - name: Log in to container registry
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
+          registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,format=long
+            type=ref,event=branch
+            type=ref,event=pr
       
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
@@ -31,41 +52,43 @@ jobs:
           context: .
           file: ./dockerfiles/Dockerfile.u22
           push: true
-          tags: ghcr.io/npe9/vadermodularfuzzer:latest
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
       
-      - name: Create fuzz_output directory
+      - name: Create test output directory
         run: mkdir -p fuzz_output
       
-      - name: Run tests with Docker
+      - name: Run tests
         run: |
           docker run --privileged \
             -v $(pwd):/app \
             -v $(pwd)/fuzz_output:/app/fuzz_output \
             --cap-add=SYS_PTRACE \
             --security-opt seccomp=unconfined \
-            ghcr.io/npe9/vadermodularfuzzer:latest \
+            ${{ fromJSON(steps.meta.outputs.json).tags[0] }} \
             bash -c "set -e; \
                     echo 'core' > /proc/sys/kernel/core_pattern; \
-                    cd /app; \
-                    rm -rf build; \
-                    mkdir -p build; \
-                    cd build; \
-                    cmake -DCMAKE_BUILD_TYPE=Debug .. || { echo 'CMake configuration failed'; cat CMakeFiles/CMakeError.log; exit 1; }; \
-                    make -j || { echo 'Build failed'; exit 1; }; \
-                    timeout 600 ctest --output-on-failure --verbose"
+                    cd /app && \
+                    rm -rf build && \
+                    mkdir -p build && \
+                    cd build && \
+                    cmake -DCMAKE_BUILD_TYPE=Debug .. || { echo 'CMake configuration failed'; cat CMakeFiles/CMakeError.log; exit 1; } && \
+                    make -j$(nproc) || { echo 'Build failed'; exit 1; } && \
+                    timeout ${{ env.TEST_TIMEOUT }} ctest --output-on-failure --verbose"
       
-      - name: Verify Fuzzing Results Directory
+      - name: Verify test results
         run: |
           if [ ! -d "fuzz_output" ]; then
-            echo "Error: fuzz_output directory not found"
+            echo "Error: Test output directory not found"
             exit 1
           fi
       
-      - name: Upload fuzzing results
+      - name: Upload test artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: fuzzing-results
+          name: test-results-${{ github.sha }}
           path: fuzz_output/
           retention-days: 5
+          if-no-files-found: warn

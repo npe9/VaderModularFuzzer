@@ -4,88 +4,105 @@ on:
   push:
     branches:
       - main
-      - fix/workflow-trigger  # Branch for testing CD workflow
     tags:
       - 'v*'
   workflow_dispatch:
 
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: vadermodularfuzzer
+
 jobs:
   build-and-publish:
     name: Build and Publish
-    runs-on: ubuntu-22.04
-    # Permissions required for:
-    # - contents:write: Creating and pushing tags
-    # - packages:write: Publishing Docker images to GHCR
+    runs-on: ubuntu-latest
     permissions:
-      contents: write
-      packages: write
+      contents: write  # Required for creating tags and releases
+      packages: write  # Required for pushing Docker images
 
     steps:
-    - uses: actions/checkout@v4
-      with:
-        submodules: recursive
-        token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0  # Required for proper versioning
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-    - name: Login to GitHub Container Registry
-      uses: docker/login-action@v3
-      with:
-        registry: ghcr.io
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Log in to container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Set sanitized tag
-      id: set_tag
-      run: |
-        SANITIZED_TAG=$(echo "${{ github.ref_name }}" | tr '/' '-')
-        echo "tag=$SANITIZED_TAG" >> $GITHUB_OUTPUT
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=ref,event=branch
+            type=sha,format=long
 
-    - name: Create Git tag
-      if: github.ref_type != 'tag'
-      run: |
-        git config --global user.name "GitHub Actions"
-        git config --global user.email "actions@github.com"
-        TAG="v$(date +%Y%m%d)-$(git rev-parse --short HEAD)"
-        git tag -a "$TAG" -m "Release $TAG"
-        git push https://${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git "$TAG"
+      - name: Generate version tag
+        id: version
+        if: github.ref_type != 'tag'
+        run: |
+          VERSION="v$(date +%Y%m%d)-$(git rev-parse --short HEAD)"
+          echo "tag=$VERSION" >> $GITHUB_OUTPUT
 
-    - name: Build and push Docker image
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        file: dockerfiles/Dockerfile.klee
-        push: true
-        tags: ghcr.io/${{ github.repository_owner }}/vadermodularfuzzer:${{ steps.set_tag.outputs.tag }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
-        build-args: |
-          WORKDIR=/usr/local/src/VaderModularFuzzer
+      - name: Create Git tag
+        if: github.ref_type != 'tag'
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a ${{ steps.version.outputs.tag }} -m "Release ${{ steps.version.outputs.tag }}"
+          git push origin ${{ steps.version.outputs.tag }}
 
-    - name: Create GitHub Release
-      uses: softprops/action-gh-release@v1
-      with:
-        generate_release_notes: true
-        files: |
-          build/vader-*.tar.gz
-          build/vader-*.zip
-        tag_name: ${{ github.ref_name }}
-        name: Release ${{ github.ref_name }}
-        token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: dockerfiles/Dockerfile.klee
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            WORKDIR=/usr/local/src/VaderModularFuzzer
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        if: github.ref_type == 'tag' || steps.version.outputs.tag != ''
+        with:
+          generate_release_notes: true
+          files: |
+            build/vader-*.tar.gz
+            build/vader-*.zip
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || steps.version.outputs.tag }}
+          name: Release ${{ github.ref_type == 'tag' && github.ref_name || steps.version.outputs.tag }}
+          draft: false
+          prerelease: ${{ !startsWith(github.ref, 'refs/tags/v') }}
 
   deploy:
-    name: Deploy
-    runs-on: ubuntu-22.04
+    name: Deploy to Production
+    runs-on: ubuntu-latest
     needs: build-and-publish
     if: github.ref == 'refs/heads/main'
-
+    
     steps:
-    - name: Deploy to production
-      run: |
-        # Add your deployment steps here
-        # This could include:
-        # - Deploying to cloud services
-        # - Updating container orchestration
-        # - Running database migrations
-        echo "Deployment steps would go here" 
+      - name: Deploy to production
+        id: deploy
+        run: |
+          # Add your deployment steps here
+          # This could include:
+          # - Deploying to cloud services
+          # - Updating container orchestration
+          # - Running database migrations
+          echo "Deployment steps to be implemented" 
