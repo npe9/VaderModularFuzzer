@@ -132,3 +132,10 @@ This directory is installed with the VMF binaries in a distribution install.
 VMF is licensed under GNU General Public License Version 2
 See [LICENSE](LICENSE)
 
+# VaderModularFuzzer
+
+A modular fuzzing framework for security testing.
+
+[![CI](https://github.com/npe9/VaderModularFuzzer/actions/workflows/ci.yml/badge.svg)](https://github.com/npe9/VaderModularFuzzer/actions/workflows/ci.yml)
+[![CD](https://github.com/npe9/VaderModularFuzzer/actions/workflows/cd.yml/badge.svg)](https://github.com/npe9/VaderModularFuzzer/actions/workflows/cd.yml)
+
