@@ -24,7 +24,14 @@ jobs:
         cmake --version
 
     - name: Configure CMake
-      run: cmake -B build
+      run: |
+        cmake -B build -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON
 
     - name: Build
-      run: cmake --build build 
+      run: |
+        cmake --build build --parallel
+
+    - name: Run tests
+      run: |
+        cd build
+        ctest --output-on-failure 
