@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - fix/workflow-trigger  # Development branch for testing CD
     tags:
       - 'v*'
   workflow_dispatch:
