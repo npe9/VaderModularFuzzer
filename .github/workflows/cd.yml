@@ -40,6 +40,8 @@ jobs:
         tags: ghcr.io/${{ github.repository_owner }}/vadermodularfuzzer:${{ github.ref_name }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
+        build-args: |
+          WORKDIR=/usr/local/src/VaderModularFuzzer
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v1
