@@ -15,12 +15,16 @@ jobs:
     - name: Build and test with Docker
       run: |
         set -e
-        docker build -t vader-modular-fuzzer .
+        docker build -t vader-modular-fuzzer -f dockerfiles/Dockerfile.u22 .
         docker run -v $(pwd)/fuzz_output:/app/fuzz_output vader-modular-fuzzer /bin/bash -c "
           set -e
           mkdir -p fuzz_output
-          timeout 300 ./build/bin/unit_tests
-          timeout 300 ./build/bin/fuzzing_tests
+          mkdir -p build
+          cd build
+          cmake ..
+          make -j$(nproc)
+          timeout 300 ./bin/unit_tests
+          timeout 300 ./bin/fuzzing_tests
         "
 
     - name: Upload fuzzing results
