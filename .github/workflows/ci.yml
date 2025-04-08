@@ -38,10 +38,10 @@ jobs:
       - name: Run tests with Docker
         run: |
           docker run --privileged \
-            -v $(pwd)/fuzz_output:/fuzz_output \
-            -e VMF_TEST_TIMEOUT=300 \
+            -v $(pwd):/app \
+            -v $(pwd)/fuzz_output:/app/fuzz_output \
             ghcr.io/${{ github.repository }}:latest \
-            bash -c "cd /usr/local/test && cmake -B build -S . && cd build && make -j && ctest --output-on-failure"
+            bash -c "cd /app && mkdir -p build && cd build && cmake .. && make -j && ctest --output-on-failure"
       
       - name: Verify Fuzzing Results Directory
         run: |
