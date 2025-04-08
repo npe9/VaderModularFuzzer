@@ -19,6 +19,8 @@ jobs:
 
     - name: Build and test with Docker
       run: |
+        set -e  # Exit on any error
+        
         # Build the Docker image
         docker build -t vmf-test -f dockerfiles/Dockerfile.u22 .
         
@@ -27,13 +29,27 @@ jobs:
         
         # Run fuzzing tests
         docker run --rm -v $(pwd):/workdir vmf-test bash -c "
-          cd /workdir &&
+          set -e  # Exit on any error
+          cd /workdir
+          
+          # Create output directory
+          mkdir -p fuzz_output
+          
           # Build test binaries
-          cd test/haystackSUT && make &&
-          cd ../magicBytesSUT && make &&
-          cd ../.. &&
-          # Run fuzzing tests
-          vmf fuzz -c test/haystackSUT/haystack_stdin.yaml -o fuzz_output/haystack_stdin &&
-          vmf fuzz -c test/haystackSUT/haystack_file.yaml -o fuzz_output/haystack_file &&
-          vmf fuzz -c test/magicBytesSUT/magicbytes.yaml -o fuzz_output/magicbytes
-        " 
+          cd test/haystackSUT && make
+          cd ../magicBytesSUT && make
+          cd ../..
+          
+          # Run fuzzing tests with timeout
+          timeout 300 vmf fuzz -c test/haystackSUT/haystack_stdin.yaml -o fuzz_output/haystack_stdin
+          timeout 300 vmf fuzz -c test/haystackSUT/haystack_file.yaml -o fuzz_output/haystack_file
+          timeout 300 vmf fuzz -c test/magicBytesSUT/magicbytes.yaml -o fuzz_output/magicbytes
+        "
+
+    - name: Upload fuzzing results
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: fuzzing-results
+        path: fuzz_output/
+        retention-days: 7 
