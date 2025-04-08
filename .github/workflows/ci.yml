@@ -15,12 +15,31 @@ jobs:
     - name: Checkout Repository
       uses: actions/checkout@v3
 
-    - name: Build Docker Image and Run Tests
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Login to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: dockerfiles/Dockerfile.u22
+        push: true
+        tags: ghcr.io/${{ github.repository }}:latest
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Run Tests
       run: |
         set -e
-        docker build -t vader-modular-fuzzer -f dockerfiles/Dockerfile.u22 .
         mkdir -p fuzz_output
-        docker run --privileged -v $(pwd):/app -v $(pwd)/fuzz_output:/app/fuzz_output vader-modular-fuzzer /bin/bash -c "
+        docker run --privileged -v $(pwd):/app -v $(pwd)/fuzz_output:/app/fuzz_output ghcr.io/${{ github.repository }}:latest /bin/bash -c "
           set -e
           cd /app
           mkdir -p fuzz_output
