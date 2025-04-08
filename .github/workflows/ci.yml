@@ -41,7 +41,14 @@ jobs:
             -v $(pwd):/app \
             -v $(pwd)/fuzz_output:/app/fuzz_output \
             ghcr.io/${{ github.repository }}:latest \
-            bash -c "cd /app && mkdir -p build && cd build && cmake .. && make -j && ctest --output-on-failure"
+            bash -c "set -e; \
+                    cd /app; \
+                    rm -rf build; \
+                    mkdir -p build; \
+                    cd build; \
+                    cmake -DCMAKE_BUILD_TYPE=Debug .. || { echo 'CMake configuration failed'; cat CMakeFiles/CMakeError.log; exit 1; }; \
+                    make -j || { echo 'Build failed'; exit 1; }; \
+                    timeout 300 ctest --output-on-failure --verbose"
       
       - name: Verify Fuzzing Results Directory
         run: |
@@ -57,4 +64,4 @@ jobs:
         with:
           name: fuzz-results
           path: fuzz_output/
-          if-no-files-found: warn 
+          if-no-files-found: warn
