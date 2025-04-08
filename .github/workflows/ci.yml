@@ -7,27 +7,29 @@ on:
     branches: [ main ]
 
 jobs:
-  test:
+  build-and-test:
+    name: Build and Test Vader Modular Fuzzer
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout Repository
+      uses: actions/checkout@v3
 
-    - name: Build and test with Docker
+    - name: Build Docker Image and Run Tests
       run: |
         set -e
         docker build -t vader-modular-fuzzer -f dockerfiles/Dockerfile.u22 .
-        docker run -v $(pwd)/fuzz_output:/app/fuzz_output vader-modular-fuzzer /bin/bash -c "
+        docker run -v $(pwd):/app -v $(pwd)/fuzz_output:/app/fuzz_output vader-modular-fuzzer /bin/bash -c "
           set -e
+          cd /app
           mkdir -p fuzz_output
           mkdir -p build
           cd build
-          cmake ..
+          cmake -DCMAKE_BUILD_TYPE=Debug ..
           make -j$(nproc)
-          timeout 300 ./bin/unit_tests
-          timeout 300 ./bin/fuzzing_tests
+          ctest --output-on-failure
         "
 
-    - name: Upload fuzzing results
+    - name: Archive Fuzzing Test Results
       uses: actions/upload-artifact@v4
       if: always()
       with:
