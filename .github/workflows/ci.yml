@@ -17,30 +17,7 @@ jobs:
       with:
         submodules: recursive
 
-    - name: Install dependencies
+    - name: Build and test with Docker
       run: |
-        sudo apt-get update
-        sudo apt-get install -y build-essential cmake libgtest-dev
-
-    - name: Basic system info
-      run: |
-        uname -a
-        gcc --version
-        cmake --version
-
-    - name: Configure CMake
-      run: |
-        cmake -B build \
-          -DCMAKE_BUILD_TYPE=Debug \
-          -DBUILD_TESTING=ON \
-          -DCMAKE_CXX_STANDARD=17 \
-          -DCMAKE_CXX_STANDARD_REQUIRED=ON
-
-    - name: Build
-      run: |
-        cmake --build build --parallel
-
-    - name: Run tests
-      run: |
-        cd build
-        ctest --output-on-failure 
+        docker build -t vmf-test -f dockerfiles/Dockerfile.u22 .
+        docker run --rm vmf-test bash -c "cd /usr/local/src/vmf/build && ctest --output-on-failure" 
