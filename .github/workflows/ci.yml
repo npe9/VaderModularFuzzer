@@ -1,0 +1,71 @@
+name: VMF CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    name: Build and Test VMF
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./dockerfiles/Dockerfile.u22
+          push: true
+          tags: ghcr.io/draperlaboratory/vadermodularfuzzer:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      
+      - name: Create fuzz_output directory
+        run: mkdir -p fuzz_output
+      
+      - name: Run tests with Docker
+        run: |
+          docker run --privileged \
+            -v $(pwd):/app \
+            -v $(pwd)/fuzz_output:/app/fuzz_output \
+            --cap-add=SYS_PTRACE \
+            --security-opt seccomp=unconfined \
+            ghcr.io/draperlaboratory/vadermodularfuzzer:latest \
+            bash -c "set -e; \
+                    echo 'core' > /proc/sys/kernel/core_pattern; \
+                    cd /app; \
+                    rm -rf build; \
+                    mkdir -p build; \
+                    cd build; \
+                    cmake -DCMAKE_BUILD_TYPE=Debug .. || { echo 'CMake configuration failed'; cat CMakeFiles/CMakeError.log; exit 1; }; \
+                    make -j || { echo 'Build failed'; exit 1; }; \
+                    timeout 600 ctest --output-on-failure --verbose"
+      
+      - name: Verify Fuzzing Results Directory
+        run: |
+          if [ ! -d "fuzz_output" ]; then
+            echo "Error: fuzz_output directory not found"
+            exit 1
+          fi
+      
+      - name: Upload fuzzing results
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzzing-results
+          path: fuzz_output/
+          retention-days: 5
