@@ -15,48 +15,60 @@ permissions:
   packages: write
 
 jobs:
-  build-packages:
-    name: Build Packages
+  build-debian:
+    name: Build Debian Packages
     runs-on: ubuntu-latest
     if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
-    strategy:
-      matrix:
-        os: [ubuntu-20.04, ubuntu-22.04, centos-8, centos-9, kali]
+    container:
+      image: debian:bullseye
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Build Debian package
-        if: matrix.os == 'ubuntu-20.04' || matrix.os == 'ubuntu-22.04' || matrix.os == 'kali'
-        uses: docker://debian:bullseye
-        with:
-          args: |
-            apt-get update
-            apt-get install -y build-essential debhelper devscripts
-            dpkg-buildpackage -us -uc
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y build-essential debhelper devscripts
 
-      - name: Build RPM package
-        if: matrix.os == 'centos-8' || matrix.os == 'centos-9'
-        uses: docker://centos:8
-        with:
-          args: |
-            dnf install -y rpm-build rpmdevtools
-            rpmbuild -ba SPECS/vadermodularfuzzer.spec
+      - name: Build package
+        run: dpkg-buildpackage -us -uc
 
       - name: Upload packages
         uses: actions/upload-artifact@v4
         with:
-          name: packages-${{ github.sha }}
-          path: |
-            *.deb
-            *.rpm
-            *.pkg.tar.zst
+          name: debian-packages-${{ github.sha }}
+          path: ../*.deb
+
+  build-rpm:
+    name: Build RPM Packages
+    runs-on: ubuntu-latest
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
+    container:
+      image: centos:8
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install build dependencies
+        run: |
+          dnf install -y rpm-build rpmdevtools
+
+      - name: Build package
+        run: rpmbuild -ba SPECS/vadermodularfuzzer.spec
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: rpm-packages-${{ github.sha }}
+          path: ~/rpmbuild/RPMS/*/*.rpm
 
   deploy:
     name: Deploy to Production
-    needs: [build-packages]
+    needs: [build-debian, build-rpm]
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -66,11 +78,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download packages
+      - name: Download Debian packages
         uses: actions/download-artifact@v4
         with:
-          name: packages-${{ github.sha }}
-          path: build/
+          name: debian-packages-${{ github.sha }}
+          path: build/debian
+
+      - name: Download RPM packages
+        uses: actions/download-artifact@v4
+        with:
+          name: rpm-packages-${{ github.sha }}
+          path: build/rpm
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -106,15 +124,14 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            build/*.deb
-            build/*.rpm
-            build/*.pkg.tar.zst
+            build/debian/*.deb
+            build/rpm/*.rpm
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup GPG for package signing
-        if: secrets.GPG_PRIVATE_KEY != '' && secrets.GPG_PASSPHRASE != ''
+        if: ${{ secrets.GPG_PRIVATE_KEY != '' && secrets.GPG_PASSPHRASE != '' }}
         run: |
           echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --import
           echo "${{ secrets.GPG_PASSPHRASE }}" | gpg --passphrase-fd 0 --batch --yes --pinentry-mode loopback --export-secret-keys --armor > private.key
@@ -122,16 +139,16 @@ jobs:
           rm private.key
 
       - name: Sign Debian packages
-        if: secrets.GPG_PRIVATE_KEY != '' && secrets.GPG_PASSPHRASE != ''
+        if: ${{ secrets.GPG_PRIVATE_KEY != '' && secrets.GPG_PASSPHRASE != '' }}
         run: |
-          for deb in build/*.deb; do
+          for deb in build/debian/*.deb; do
             dpkg-sig --sign builder "$deb"
           done
 
       - name: Sign RPM packages
-        if: secrets.GPG_PRIVATE_KEY != '' && secrets.GPG_PASSPHRASE != ''
+        if: ${{ secrets.GPG_PRIVATE_KEY != '' && secrets.GPG_PASSPHRASE != '' }}
         run: |
-          for rpm in build/*.rpm; do
+          for rpm in build/rpm/*.rpm; do
             rpm --addsign "$rpm"
           done
 
@@ -139,7 +156,7 @@ jobs:
         run: |
           # Create Debian repository structure
           mkdir -p repo/debian
-          cp build/*.deb repo/debian/
+          cp build/debian/*.deb repo/debian/
           cd repo/debian
           apt-ftparchive packages . > Packages
           apt-ftparchive release . > Release
@@ -150,7 +167,7 @@ jobs:
 
           # Create RPM repository structure
           mkdir -p repo/rpm
-          cp build/*.rpm repo/rpm/
+          cp build/rpm/*.rpm repo/rpm/
           cd repo/rpm
           createrepo .
           if [ "${{ secrets.GPG_PRIVATE_KEY }}" != "" ] && [ "${{ secrets.GPG_PASSPHRASE }}" != "" ]; then
