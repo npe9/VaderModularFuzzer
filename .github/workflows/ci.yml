@@ -92,9 +92,10 @@ jobs:
           file: dockerfiles/Dockerfile.klee
           build-args: |
             VMF_REPO=https://github.com/${{ github.repository }}.git
-          tags: ghcr.io/${{ github.repository_owner }}/${{ matrix.image_name }}:latest
+          tags: ghcr.io/${{ github.repository_owner }}/vadermodularfuzzer:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          load: true
       
       - name: Create test output directories
         run: |
@@ -103,44 +104,11 @@ jobs:
       
       - name: Run unit tests
         run: |
-          docker run --privileged \
-            -v $(pwd):/app \
-            -v $(pwd)/fuzz_output:/app/fuzz_output \
-            --cap-add=SYS_PTRACE \
-            --security-opt seccomp=unconfined \
-            ${{ fromJSON(steps.meta.outputs.json).tags[0] }} \
-            bash -c "set -e; \
-                    echo 'core' > /proc/sys/kernel/core_pattern; \
-                    cd /app && \
-                    rm -rf build && \
-                    mkdir -p build && \
-                    cd build && \
-                    cmake -DCMAKE_BUILD_TYPE=Debug .. || { echo 'CMake configuration failed'; cat CMakeFiles/CMakeError.log; exit 1; } && \
-                    make -j$(nproc) || { echo 'Build failed'; exit 1; } && \
-                    timeout ${{ env.TEST_TIMEOUT }} ctest --output-on-failure --verbose"
+          docker run --rm ghcr.io/${{ github.repository_owner }}/vadermodularfuzzer:latest python3 -m pytest test/unit_test.py
 
       - name: Run system tests
         run: |
-          docker run --privileged \
-            -v $(pwd):/app \
-            -v $(pwd)/fuzz_output:/app/fuzz_output \
-            --cap-add=SYS_PTRACE \
-            --security-opt seccomp=unconfined \
-            ${{ fromJSON(steps.meta.outputs.json).tags[0] }} \
-            bash -c "set -e; \
-                    cd /app && \
-                    cd test && \
-                    # Build magicbytes SUT
-                    cd magicBytesSUT && \
-                    make clean || true && make && \
-                    cd .. && \
-                    # Build haystack SUT
-                    cd haystackSUT && \
-                    make clean || true && make && \
-                    cd .. && \
-                    # Run fuzzing tests
-                    timeout ${{ env.FUZZ_TIMEOUT }} python3 -m vmf -c config/basicModules.yaml -i magicBytesSUT/inputs -o fuzz_output/magicbytes magicBytesSUT/magicbytes && \
-                    timeout ${{ env.FUZZ_TIMEOUT }} python3 -m vmf -c config/basicModules.yaml -i haystackSUT/inputs -o fuzz_output/haystack haystackSUT/haystack"
+          docker run --rm ghcr.io/${{ github.repository_owner }}/vadermodularfuzzer:latest bash -c "cd /usr/local/src/VaderModularFuzzer && python3 test/system_test.sh"
       
       - name: Verify test results
         run: |
