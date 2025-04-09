@@ -32,9 +32,7 @@ jobs:
         if: matrix.os == 'ubuntu-20.04' || matrix.os == 'ubuntu-22.04' || matrix.os == 'kali'
         uses: docker://debian:bullseye
         with:
-          entrypoint: /bin/bash
           args: |
-            -c |
             apt-get update
             apt-get install -y build-essential debhelper devscripts
             dpkg-buildpackage -us -uc
@@ -43,9 +41,7 @@ jobs:
         if: matrix.os == 'centos-8' || matrix.os == 'centos-9'
         uses: docker://centos:8
         with:
-          entrypoint: /bin/bash
           args: |
-            -c |
             dnf install -y rpm-build rpmdevtools
             rpmbuild -ba SPECS/vadermodularfuzzer.spec
 
