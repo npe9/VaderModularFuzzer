@@ -70,13 +70,18 @@ RUN set -ex \
 FROM aflpp AS vmf
 
 # Clone, build, install VMF
+ARG VMF_REPO=https://github.com/draperlaboratory/vadermodularfuzzer.git
 RUN set -ex \
     && cd /usr/local/src \
-    && git clone --depth 1 https://github.com/draperlaboratory/vadermodularfuzzer.git vmf\
-    && cd vmf \
+    && git clone --depth 1 ${VMF_REPO} \
+    && cd vadermodularfuzzer \
     && mkdir -p build \
     && cd build \
     && cmake -DCMAKE_INSTALL_PREFIX=/usr/local .. \
     && make -j \
     && make install \
+    && cd /usr/local/src/vadermodularfuzzer \
+    && pip3 install -e . \
     && set +ex
+
+WORKDIR /usr/local/src/vadermodularfuzzer

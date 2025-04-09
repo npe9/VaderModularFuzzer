@@ -1,0 +1,5 @@
+vadermodularfuzzer (1.0.0-1) unstable; urgency=medium
+
+  * Initial release.
+
+ -- VMF Team <vmf@draper.com>  $(date -R) 

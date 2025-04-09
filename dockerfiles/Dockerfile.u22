@@ -34,22 +34,16 @@ RUN  apt-get update \
        python3-pip \
        python3-setuptools \
        build-essential \
-       cmake
+       cmake \
+       afl++ \
+       afl++-clang
 
 ENV  LLVM_CONFIG=llvm-config-15
 
-FROM deps AS aflpp
+# No need for AFL++ build stage since we're using the package
+FROM deps
 
-# Clone and build AFL++
-RUN set -ex \
-    && cd /usr/local/src \
-    && git clone --depth 1 -b v4.10c https://github.com/AFLplusplus/AFLplusplus.git \
-    && cd AFLplusplus \
-    && make all || (echo "AFL++ build failed" && exit 1) \
-    && make install || (echo "AFL++ install failed" && exit 1) \
-    && set +ex
-
-FROM aflpp AS vmf
+FROM deps AS vmf
 
 # Clone, build, install VMF
 RUN set -ex \
