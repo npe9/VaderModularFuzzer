@@ -13,12 +13,9 @@ RUN  apt-get update \
 RUN  apt-get update \
      && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --fix-missing \
        graphviz \
-       clang-16 \
        clang \
        doxygen \
        libcurl4-openssl-dev \
-       llvm-16 \
-       llvm-16-dev \
        llvm \
        llvm-dev \
        lld \
@@ -28,7 +25,7 @@ RUN  apt-get update \
        build-essential \
        cmake
 
-ENV  LLVM_CONFIG=llvm-config-16
+ENV  LLVM_CONFIG=llvm-config
 
 FROM deps AS aflpp
 
