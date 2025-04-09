@@ -15,15 +15,23 @@ permissions:
   packages: write
 
 jobs:
-  build-and-publish:
-    name: Build and Publish
+  deploy:
+    name: Deploy to Production
     runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
     strategy:
       matrix:
         image_name: [klee, u20, u22, centos8, centos9, kali]
+    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Download packages from CI
+        uses: actions/download-artifact@v4
+        with:
+          name: packages-${{ github.sha }}
+          path: build/
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -35,7 +43,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push Docker image
+      - name: Build and push Docker images
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -48,23 +56,6 @@ jobs:
           cache-to: type=gha,mode=max
           platforms: linux/amd64
 
-  deploy:
-    name: Deploy to Production
-    runs-on: ubuntu-latest
-    needs: build-and-publish
-    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
-    
-    steps:
-      - name: Deploy to production
-        id: deploy
-        run: |
-          # Add your deployment steps here
-          # This could include:
-          # - Deploying to cloud services
-          # - Updating container orchestration
-          # - Running database migrations
-          echo "Deployment steps to be implemented"
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
@@ -72,5 +63,15 @@ jobs:
             build/*.deb
             build/*.rpm
             build/*.pkg.tar.zst
+          generate_release_notes: true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish to Package Repositories
+        run: |
+          # Add your package repository publishing logic here
+          # This could include:
+          # - Publishing to Debian repository
+          # - Publishing to RPM repository
+          # - Publishing to Arch Linux repository
+          echo "Package publishing steps to be implemented" 

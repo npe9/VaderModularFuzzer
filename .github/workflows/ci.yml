@@ -2,16 +2,11 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, 'fix/workflow-trigger' ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
     inputs:
-      publish_packages:
-        description: 'Publish packages to repositories'
-        required: false
-        type: boolean
-        default: false
       sign_packages:
         description: 'Sign packages with GPG'
         required: false
@@ -24,7 +19,6 @@ env:
   TEST_TIMEOUT: 600  # 10 minutes - Timeout for running test suite with CTest
   FUZZ_TIMEOUT: 300  # 5 minutes - Timeout for each fuzzing test
   SIGN_PACKAGES: ${{ github.event.inputs.sign_packages || false }}
-  PUBLISH_PACKAGES: ${{ github.event.inputs.publish_packages || false }}
 
 jobs:
   setup-signing:
@@ -139,11 +133,11 @@ jobs:
           retention-days: 5
           if-no-files-found: warn
 
-  build-debian:
-    name: Build Debian Package
+  build-packages:
+    name: Build Packages
     runs-on: ubuntu-latest
     needs: [build-and-test, setup-signing]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/fix/workflow-trigger')
     
     steps:
       - name: Checkout repository
@@ -158,233 +152,44 @@ jobs:
           name: gpg-config
           path: ~/.gnupg/
       
-      - name: Install build dependencies
+      - name: Build Debian package
         run: |
           sudo apt-get update
           sudo apt-get install -y devscripts build-essential lintian gnupg2
-      
-      - name: Build Debian package
-        run: |
           if [ "${{ github.event.inputs.sign_packages }}" = "true" ]; then
             dpkg-buildpackage -k${{ secrets.GPG_KEY_ID }}
           else
             dpkg-buildpackage -us -uc
           fi
           lintian ../*.changes
-      
-      - name: Upload Debian package
-        uses: actions/upload-artifact@v4
-        with:
-          name: debian-package-${{ github.sha }}
-          path: ../*.deb
-          retention-days: 5
-      
-      - name: Publish to Debian repository
-        if: github.event.inputs.publish_packages == 'true'
-        run: |
-          # Add your Debian repository publishing logic here
-          echo "Publishing to Debian repository..."
-
-  build-rpm:
-    name: Build RPM Package
-    runs-on: ubuntu-latest
-    needs: [build-and-test, setup-signing]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      
-      - name: Download GPG configuration
-        if: github.event.inputs.sign_packages == 'true'
-        uses: actions/download-artifact@v4
-        with:
-          name: gpg-config
-          path: ~/.gnupg/
-      
-      - name: Set up Docker
-        uses: docker/setup-buildx-action@v3
+          mkdir -p build
+          mv ../*.deb build/
       
       - name: Build RPM package
-        uses: docker://fedora:latest
-        with:
-          entrypoint: /bin/bash
-          args: |
-            -c |
-            dnf install -y rpm-build rpmdevtools gnupg2
-            rpmdev-setuptree
-            cp -r /github/workspace/* /root/rpmbuild/SOURCES/
-            cd /root/rpmbuild/SOURCES
-            tar czf /root/rpmbuild/SOURCES/vadermodularfuzzer-1.0.0.tar.gz .
-            if [ "${{ github.event.inputs.sign_packages }}" = "true" ]; then
-              rpmbuild -ba --sign vadermodularfuzzer.spec
-            else
-              rpmbuild -ba vadermodularfuzzer.spec
-            fi
-      
-      - name: Upload RPM package
-        uses: actions/upload-artifact@v4
-        with:
-          name: rpm-package-${{ github.sha }}
-          path: /root/rpmbuild/RPMS/*/*.rpm
-          retention-days: 5
-      
-      - name: Publish to RPM repository
-        if: github.event.inputs.publish_packages == 'true'
         run: |
-          # Add your RPM repository publishing logic here
-          echo "Publishing to RPM repository..."
-
-  build-arch:
-    name: Build Arch Linux Package
-    runs-on: ubuntu-latest
-    needs: [build-and-test, setup-signing]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      
-      - name: Download GPG configuration
-        if: github.event.inputs.sign_packages == 'true'
-        uses: actions/download-artifact@v4
-        with:
-          name: gpg-config
-          path: ~/.gnupg/
-      
-      - name: Set up Docker
-        uses: docker/setup-buildx-action@v3
+          sudo apt-get install -y rpm rpm-build
+          mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+          cp -r . ~/rpmbuild/SOURCES/
+          if [ "${{ github.event.inputs.sign_packages }}" = "true" ]; then
+            rpmbuild -ba --sign --define "_gpg_name ${{ secrets.GPG_KEY_ID }}" ~/rpmbuild/SOURCES/package.spec
+          else
+            rpmbuild -ba ~/rpmbuild/SOURCES/package.spec
+          fi
+          mkdir -p build
+          cp ~/rpmbuild/RPMS/*/*.rpm build/
       
       - name: Build Arch Linux package
-        uses: docker://archlinux:latest
-        with:
-          entrypoint: /bin/bash
-          args: |
-            -c |
-            pacman -Syu --noconfirm base-devel git gnupg
-            useradd -m -G wheel builder
-            echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
-            if [ "${{ github.event.inputs.sign_packages }}" = "true" ]; then
-              su builder -c "cd /github/workspace && makepkg -s --sign --noconfirm"
-            else
-              su builder -c "cd /github/workspace && makepkg -s --noconfirm"
-            fi
+        run: |
+          sudo apt-get install -y base-devel
+          makepkg --syncdeps --noconfirm
+          mkdir -p build
+          cp *.pkg.tar.zst build/
       
-      - name: Upload Arch Linux package
+      - name: Upload packages
         uses: actions/upload-artifact@v4
         with:
-          name: arch-package-${{ github.sha }}
-          path: "*.pkg.tar.zst"
+          name: packages-${{ github.sha }}
+          path: build/
           retention-days: 5
-      
-      - name: Publish to Arch repository
-        if: github.event.inputs.publish_packages == 'true'
-        run: |
-          # Add your Arch repository publishing logic here
-          echo "Publishing to Arch repository..."
-
-  build-gentoo:
-    name: Build Gentoo Package
-    runs-on: ubuntu-latest
-    needs: [build-and-test, setup-signing]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      
-      - name: Download GPG configuration
-        if: github.event.inputs.sign_packages == 'true'
-        uses: actions/download-artifact@v4
-        with:
-          name: gpg-config
-          path: ~/.gnupg/
-      
-      - name: Set up Docker
-        uses: docker/setup-buildx-action@v3
-      
-      - name: Build Gentoo package
-        uses: docker://gentoo/stage3:latest
-        with:
-          entrypoint: /bin/bash
-          args: |
-            -c |
-            emerge --sync
-            emerge -v dev-vcs/git app-crypt/gnupg
-            cd /github/workspace
-            # Add Gentoo ebuild creation and building logic here
-            echo "Building Gentoo package..."
-      
-      - name: Upload Gentoo package
-        uses: actions/upload-artifact@v4
-        with:
-          name: gentoo-package-${{ github.sha }}
-          path: "*.tbz2"
-          retention-days: 5
-      
-      - name: Publish to Gentoo repository
-        if: github.event.inputs.publish_packages == 'true'
-        run: |
-          # Add your Gentoo repository publishing logic here
-          echo "Publishing to Gentoo repository..."
-
-  build-suse:
-    name: Build openSUSE Package
-    runs-on: ubuntu-latest
-    needs: [build-and-test, setup-signing]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      
-      - name: Download GPG configuration
-        if: github.event.inputs.sign_packages == 'true'
-        uses: actions/download-artifact@v4
-        with:
-          name: gpg-config
-          path: ~/.gnupg/
-      
-      - name: Set up Docker
-        uses: docker/setup-buildx-action@v3
-      
-      - name: Build openSUSE package
-        uses: docker://opensuse/leap:latest
-        with:
-          entrypoint: /bin/bash
-          args: |
-            -c |
-            zypper refresh
-            zypper install -y rpm-build rpmdevtools gnupg2
-            rpmdev-setuptree
-            cp -r /github/workspace/* /root/rpmbuild/SOURCES/
-            cd /root/rpmbuild/SOURCES
-            tar czf /root/rpmbuild/SOURCES/vadermodularfuzzer-1.0.0.tar.gz .
-            if [ "${{ github.event.inputs.sign_packages }}" = "true" ]; then
-              rpmbuild -ba --sign vadermodularfuzzer.spec
-            else
-              rpmbuild -ba vadermodularfuzzer.spec
-            fi
-      
-      - name: Upload openSUSE package
-        uses: actions/upload-artifact@v4
-        with:
-          name: suse-package-${{ github.sha }}
-          path: /root/rpmbuild/RPMS/*/*.rpm
-          retention-days: 5
-      
-      - name: Publish to openSUSE repository
-        if: github.event.inputs.publish_packages == 'true'
-        run: |
-          # Add your openSUSE repository publishing logic here
-          echo "Publishing to openSUSE repository..."
 
 # Triggering CI workflow with a comment update
