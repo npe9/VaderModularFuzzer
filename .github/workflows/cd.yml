@@ -2,11 +2,8 @@ name: CD
 
 on:
   push:
-    branches:
-      - main
-      - fix/workflow-trigger  # Development branch for testing CD
-    tags:
-      - 'v*'
+    branches: [ main ]
+    tags: [ 'v*' ]
   workflow_dispatch:
 
 env:
@@ -17,79 +14,35 @@ jobs:
   build-and-publish:
     name: Build and Publish
     runs-on: ubuntu-latest
-    permissions:
-      contents: write  # Required for creating tags and releases
-      packages: write  # Required for pushing Docker images
-
+    strategy:
+      matrix:
+        image_name: [klee, u20, u22, centos8, centos9, kali]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
-          fetch-depth: 0  # Required for proper versioning
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to container registry
+      - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata for Docker
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=ref,event=branch
-            type=sha,format=long
-
-      - name: Generate version tag
-        id: version
-        if: github.ref_type != 'tag'
-        run: |
-          VERSION="v$(date +%Y%m%d)-$(git rev-parse --short HEAD)"
-          echo "tag=$VERSION" >> $GITHUB_OUTPUT
-
-      - name: Create Git tag
-        if: github.ref_type != 'tag'
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a ${{ steps.version.outputs.tag }} -m "Release ${{ steps.version.outputs.tag }}"
-          git push origin ${{ steps.version.outputs.tag }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: dockerfiles/Dockerfile.klee
+          file: dockerfiles/Dockerfile.${{ matrix.image_name }}
+          build-args: |
+            VMF_REPO=https://github.com/${{ github.repository }}.git
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ghcr.io/${{ github.repository_owner }}/${{ matrix.image_name }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          build-args: |
-            WORKDIR=/usr/local/src/VaderModularFuzzer
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
-        if: github.ref_type == 'tag' || steps.version.outputs.tag != ''
-        with:
-          generate_release_notes: true
-          files: |
-            build/vader-*.tar.gz
-            build/vader-*.zip
-          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || steps.version.outputs.tag }}
-          name: Release ${{ github.ref_type == 'tag' && github.ref_name || steps.version.outputs.tag }}
-          draft: false
-          prerelease: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+          platforms: linux/amd64
 
   deploy:
     name: Deploy to Production
@@ -106,4 +59,14 @@ jobs:
           # - Deploying to cloud services
           # - Updating container orchestration
           # - Running database migrations
-          echo "Deployment steps to be implemented" 
+          echo "Deployment steps to be implemented"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            build/*.deb
+            build/*.rpm
+            build/*.pkg.tar.zst
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 

@@ -85,15 +85,14 @@ jobs:
             type=ref,event=branch
             type=ref,event=pr
       
-      - name: Build and push Docker image
+      - name: Build Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./dockerfiles/Dockerfile.u22
-          push: true
-          platforms: linux/amd64
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          file: dockerfiles/Dockerfile.klee
+          build-args: |
+            VMF_REPO=https://github.com/${{ github.repository }}.git
+          tags: ghcr.io/${{ github.repository_owner }}/${{ matrix.image_name }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
       
