@@ -28,26 +28,35 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Build Debian package
+        if: matrix.os == 'ubuntu-20.04' || matrix.os == 'ubuntu-22.04' || matrix.os == 'kali'
+        uses: docker://debian:bullseye
         with:
-          python-version: '3.10'
+          entrypoint: /bin/bash
+          args: |
+            -c |
+            apt-get update
+            apt-get install -y build-essential debhelper devscripts
+            dpkg-buildpackage -us -uc
 
-      - name: Install build dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install build
-
-      - name: Build package
-        run: python -m build
+      - name: Build RPM package
+        if: matrix.os == 'centos-8' || matrix.os == 'centos-9'
+        uses: docker://centos:8
+        with:
+          entrypoint: /bin/bash
+          args: |
+            -c |
+            dnf install -y rpm-build rpmdevtools
+            rpmbuild -ba SPECS/vadermodularfuzzer.spec
 
       - name: Upload packages
         uses: actions/upload-artifact@v4
         with:
           name: packages-${{ github.sha }}
           path: |
-            dist/*.whl
-            dist/*.tar.gz
+            *.deb
+            *.rpm
+            *.pkg.tar.zst
 
   deploy:
     name: Deploy to Production
@@ -101,17 +110,68 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            build/*.whl
-            build/*.tar.gz
+            build/*.deb
+            build/*.rpm
+            build/*.pkg.tar.zst
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Publish to Package Repositories
+      - name: Setup GPG for package signing
+        if: secrets.GPG_PRIVATE_KEY != '' && secrets.GPG_PASSPHRASE != ''
         run: |
-          # Add your package repository publishing logic here
-          # This could include:
-          # - Publishing to Debian repository
-          # - Publishing to RPM repository
-          # - Publishing to Arch Linux repository
-          echo "Package publishing steps to be implemented" 
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --import
+          echo "${{ secrets.GPG_PASSPHRASE }}" | gpg --passphrase-fd 0 --batch --yes --pinentry-mode loopback --export-secret-keys --armor > private.key
+          gpg --import private.key
+          rm private.key
+
+      - name: Sign Debian packages
+        if: secrets.GPG_PRIVATE_KEY != '' && secrets.GPG_PASSPHRASE != ''
+        run: |
+          for deb in build/*.deb; do
+            dpkg-sig --sign builder "$deb"
+          done
+
+      - name: Sign RPM packages
+        if: secrets.GPG_PRIVATE_KEY != '' && secrets.GPG_PASSPHRASE != ''
+        run: |
+          for rpm in build/*.rpm; do
+            rpm --addsign "$rpm"
+          done
+
+      - name: Create repository metadata
+        run: |
+          # Create Debian repository structure
+          mkdir -p repo/debian
+          cp build/*.deb repo/debian/
+          cd repo/debian
+          apt-ftparchive packages . > Packages
+          apt-ftparchive release . > Release
+          if [ "${{ secrets.GPG_PRIVATE_KEY }}" != "" ] && [ "${{ secrets.GPG_PASSPHRASE }}" != "" ]; then
+            gpg --armor --detach-sign --output Release.gpg Release
+          fi
+          cd ../..
+
+          # Create RPM repository structure
+          mkdir -p repo/rpm
+          cp build/*.rpm repo/rpm/
+          cd repo/rpm
+          createrepo .
+          if [ "${{ secrets.GPG_PRIVATE_KEY }}" != "" ] && [ "${{ secrets.GPG_PASSPHRASE }}" != "" ]; then
+            gpg --detach-sign --armor repodata/repomd.xml
+          fi
+          cd ../..
+
+      - name: Upload repository
+        uses: actions/upload-artifact@v4
+        with:
+          name: repository-${{ github.sha }}
+          path: repo/
+          retention-days: 90
+
+      - name: Publish repository to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./repo
+          publish_branch: gh-pages 
