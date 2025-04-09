@@ -15,12 +15,10 @@ permissions:
   packages: write
 
 jobs:
-  build-debian:
-    name: Build Debian Packages
+  build-packages:
+    name: Build Packages
     runs-on: ubuntu-latest
     if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
-    container:
-      image: debian:bullseye
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -29,46 +27,27 @@ jobs:
 
       - name: Install build dependencies
         run: |
-          apt-get update
-          apt-get install -y build-essential debhelper devscripts
+          sudo apt-get update
+          sudo apt-get install -y build-essential debhelper devscripts rpm
 
-      - name: Build package
+      - name: Build Debian package
         run: dpkg-buildpackage -us -uc
 
-      - name: Upload packages
-        uses: actions/upload-artifact@v4
-        with:
-          name: debian-packages-${{ github.sha }}
-          path: ../*.deb
-
-  build-rpm:
-    name: Build RPM Packages
-    runs-on: ubuntu-latest
-    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
-    container:
-      image: centos:8
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Install build dependencies
+      - name: Build RPM package
         run: |
-          dnf install -y rpm-build rpmdevtools
-
-      - name: Build package
-        run: rpmbuild -ba SPECS/vadermodularfuzzer.spec
+          rpmbuild -ba SPECS/vadermodularfuzzer.spec
 
       - name: Upload packages
         uses: actions/upload-artifact@v4
         with:
-          name: rpm-packages-${{ github.sha }}
-          path: ~/rpmbuild/RPMS/*/*.rpm
+          name: packages-${{ github.sha }}
+          path: |
+            ../*.deb
+            ~/rpmbuild/RPMS/*/*.rpm
 
   deploy:
     name: Deploy to Production
-    needs: [build-debian, build-rpm]
+    needs: [build-packages]
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -78,17 +57,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download Debian packages
+      - name: Download packages
         uses: actions/download-artifact@v4
         with:
-          name: debian-packages-${{ github.sha }}
-          path: build/debian
-
-      - name: Download RPM packages
-        uses: actions/download-artifact@v4
-        with:
-          name: rpm-packages-${{ github.sha }}
-          path: build/rpm
+          name: packages-${{ github.sha }}
+          path: build/
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -124,8 +97,8 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            build/debian/*.deb
-            build/rpm/*.rpm
+            build/*.deb
+            build/*.rpm
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -141,14 +114,14 @@ jobs:
       - name: Sign Debian packages
         if: ${{ secrets.GPG_PRIVATE_KEY != '' && secrets.GPG_PASSPHRASE != '' }}
         run: |
-          for deb in build/debian/*.deb; do
+          for deb in build/*.deb; do
             dpkg-sig --sign builder "$deb"
           done
 
       - name: Sign RPM packages
         if: ${{ secrets.GPG_PRIVATE_KEY != '' && secrets.GPG_PASSPHRASE != '' }}
         run: |
-          for rpm in build/rpm/*.rpm; do
+          for rpm in build/*.rpm; do
             rpm --addsign "$rpm"
           done
 
@@ -156,7 +129,7 @@ jobs:
         run: |
           # Create Debian repository structure
           mkdir -p repo/debian
-          cp build/debian/*.deb repo/debian/
+          cp build/*.deb repo/debian/
           cd repo/debian
           apt-ftparchive packages . > Packages
           apt-ftparchive release . > Release
@@ -167,7 +140,7 @@ jobs:
 
           # Create RPM repository structure
           mkdir -p repo/rpm
-          cp build/rpm/*.rpm repo/rpm/
+          cp build/*.rpm repo/rpm/
           cd repo/rpm
           createrepo .
           if [ "${{ secrets.GPG_PRIVATE_KEY }}" != "" ] && [ "${{ secrets.GPG_PASSPHRASE }}" != "" ]; then
