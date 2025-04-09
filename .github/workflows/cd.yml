@@ -2,8 +2,8 @@ name: CD
 
 on:
   push:
-    branches: [ main ]
-    tags: [ 'v*' ]
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 env:
@@ -15,10 +15,44 @@ permissions:
   packages: write
 
 jobs:
+  build-packages:
+    name: Build Packages
+    runs-on: ubuntu-latest
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
+    strategy:
+      matrix:
+        os: [ubuntu-20.04, ubuntu-22.04, centos-8, centos-9, kali]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
+
+      - name: Build package
+        run: python -m build
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ github.sha }}
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+
   deploy:
     name: Deploy to Production
+    needs: [build-packages]
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
     strategy:
       matrix:
         image_name: [klee, u20, u22, centos8, centos9, kali]
@@ -27,7 +61,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download packages from CI
+      - name: Download packages
         uses: actions/download-artifact@v4
         with:
           name: packages-${{ github.sha }}
@@ -39,7 +73,7 @@ jobs:
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
+          registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
@@ -50,19 +84,25 @@ jobs:
           file: dockerfiles/Dockerfile.${{ matrix.image_name }}
           build-args: |
             VMF_REPO=https://github.com/${{ github.repository }}.git
+            VMF_SHA=${{ github.sha }}
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/${{ matrix.image_name }}:latest
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image_name }}:latest
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image_name }}:${{ github.ref_name }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64
+          load: true
+          target: vmf
+          build-contexts: |
+            .=./
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            build/*.deb
-            build/*.rpm
-            build/*.pkg.tar.zst
+            build/*.whl
+            build/*.tar.gz
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
