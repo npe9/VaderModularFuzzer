@@ -1,65 +1,61 @@
-FROM quay.io/centos/centos:stream8 AS deps
+FROM quay.io/centos/centos:stream8 as deps
+
+# Update mirror URLs to use CentOS Stream 8
+RUN sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-* && \
+    sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-* && \
+    dnf clean all && \
+    dnf makecache
 
 # General dependencies
 RUN  dnf install --assumeyes \
-       ca-certificates \
-       libcurl-minimal \
-       gdb \
-       git \
-       gnupg
+        ca-certificates \
+        libcurl-minimal \
+        gdb \
+        git \
+        gnupg
 
-# Development dependencies
-RUN  dnf install --assumeyes  \
-        clang \
-        libcurl-devel \
-        llvm \
-        python3-devel \
+# Install Python dependencies
+RUN dnf install --assumeyes \
+        python3 \
         python3-pip \
-        python3-setuptools \
+        python3-devel \
+        gcc \
+        gcc-c++ \
+        make \
         cmake \
-        zlib-devel
+        ninja-build \
+        clang \
+        clang-devel \
+        llvm \
+        llvm-devel \
+        zlib-devel \
+        ncurses-devel \
+        sqlite-devel \
+        readline-devel \
+        tk-devel \
+        gdbm-devel \
+        db4-devel \
+        libpcap-devel \
+        xz-devel \
+        expat-devel \
+        bzip2-devel \
+        openssl-devel \
+        libffi-devel
 
-# Remaining LLVM tools
-RUN dnf install --assumeyes \
-        lld \
-        llvm-devel 
+# Install AFL++
+FROM deps as aflpp
+RUN git clone https://github.com/AFLplusplus/AFLplusplus.git /usr/local/src/AFLplusplus && \
+    cd /usr/local/src/AFLplusplus && \
+    make source-only && \
+    make install
 
-ENV LLVM_CONFIG=llvm-config-17
+# Install VMF
+FROM deps as vmf
+ARG VMF_REPO=https://github.com/npe9/VaderModularFuzzer.git
+RUN git clone ${VMF_REPO} /usr/local/src/VaderModularFuzzer && \
+    cd /usr/local/src/VaderModularFuzzer && \
+    pip3 install -r requirements.txt && \
+    pip3 install -e .
 
-RUN pip3 install --user wheel
-
-FROM deps AS aflpp
-
-# AFL++ build dependencies
-# Currently gcc plugin version don't match available gcc version. This is necessary for some AFL++ modes.
-RUN dnf install --assumeyes \
-        automake \
-        cpio \
-        glib2-devel \
-        flex \
-        bison \
-        cargo
-
-# Clone and build AFL++
-RUN set -ex \
-    && cd /usr/local/src \
-    && git clone --depth 1 -b v4.10c https://github.com/AFLplusplus/AFLplusplus.git \
-    && cd AFLplusplus \
-    && make all \
-    && make install \
-    && set +ex
-
-FROM aflpp as vmf
-
-# Clone, build, install VMF
-RUN set -ex \
-    && cd /usr/local/src \
-    && git clone --depth 1 https://github.com/draperlaboratory/vadermodularfuzzer.git vmf\
-    && cd vmf \
-    && mkdir -p build \
-    && cd build \
-    && cmake -DCMAKE_INSTALL_PREFIX=/usr/local .. \
-    && make -j \
-    && make install \
-    && set +ex
+WORKDIR /usr/local/src/VaderModularFuzzer
     

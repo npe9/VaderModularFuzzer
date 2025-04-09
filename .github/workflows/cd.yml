@@ -6,54 +6,158 @@ on:
       - 'v*'
   workflow_dispatch:
 
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: vadermodularfuzzer
+
+permissions:
+  contents: read
+  packages: write
+
 jobs:
-  build-and-publish:
-    name: Build and Publish
-    runs-on: ubuntu-22.04
-
+  build-packages:
+    name: Build Packages
+    runs-on: ubuntu-latest
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
     steps:
-    - uses: actions/checkout@v3
-      with:
-        submodules: recursive
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v2
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential debhelper devscripts rpm
 
-    - name: Login to Docker Hub
-      uses: docker/login-action@v2
-      with:
-        username: ${{ secrets.DOCKERHUB_USERNAME }}
-        password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Build Debian package
+        run: dpkg-buildpackage -us -uc
 
-    - name: Build and push Docker image
-      uses: docker/build-push-action@v4
-      with:
-        context: .
-        push: true
-        tags: |
-          vader/vader:latest
-          vader/vader:${{ github.ref_name }}
+      - name: Build RPM package
+        run: |
+          rpmbuild -ba SPECS/vadermodularfuzzer.spec
 
-    - name: Create GitHub Release
-      uses: softprops/action-gh-release@v1
-      with:
-        generate_release_notes: true
-        files: |
-          build/vader-*.tar.gz
-          build/vader-*.zip
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ github.sha }}
+          path: |
+            ../*.deb
+            ~/rpmbuild/RPMS/*/*.rpm
 
   deploy:
-    name: Deploy
-    runs-on: ubuntu-22.04
-    needs: build-and-publish
-    if: github.ref == 'refs/heads/main'
-
+    name: Deploy to Production
+    needs: [build-packages]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        image_name: [klee, u20, u22, centos8, centos9, kali]
+    
     steps:
-    - name: Deploy to production
-      run: |
-        # Add your deployment steps here
-        # This could include:
-        # - Deploying to cloud services
-        # - Updating container orchestration
-        # - Running database migrations
-        echo "Deployment steps would go here" 
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          name: packages-${{ github.sha }}
+          path: build/
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker images
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: dockerfiles/Dockerfile.${{ matrix.image_name }}
+          build-args: |
+            VMF_REPO=https://github.com/${{ github.repository }}.git
+            VMF_SHA=${{ github.sha }}
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image_name }}:latest
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image_name }}:${{ github.ref_name }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+          load: true
+          target: vmf
+          build-contexts: |
+            .=./
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            build/*.deb
+            build/*.rpm
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup GPG for package signing
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
+        run: |
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --import
+          echo "${{ secrets.GPG_PASSPHRASE }}" | gpg --passphrase-fd 0 --batch --yes --pinentry-mode loopback --export-secret-keys --armor > private.key
+          gpg --import private.key
+          rm private.key
+
+      - name: Sign Debian packages
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
+        run: |
+          for deb in build/*.deb; do
+            dpkg-sig --sign builder "$deb"
+          done
+
+      - name: Sign RPM packages
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
+        run: |
+          for rpm in build/*.rpm; do
+            rpm --addsign "$rpm"
+          done
+
+      - name: Create repository metadata
+        run: |
+          # Create Debian repository structure
+          mkdir -p repo/debian
+          cp build/*.deb repo/debian/
+          cd repo/debian
+          apt-ftparchive packages . > Packages
+          apt-ftparchive release . > Release
+          if [ "${{ secrets.GPG_PRIVATE_KEY }}" != "" ] && [ "${{ secrets.GPG_PASSPHRASE }}" != "" ]; then
+            gpg --armor --detach-sign --output Release.gpg Release
+          fi
+          cd ../..
+
+          # Create RPM repository structure
+          mkdir -p repo/rpm
+          cp build/*.rpm repo/rpm/
+          cd repo/rpm
+          createrepo .
+          if [ "${{ secrets.GPG_PRIVATE_KEY }}" != "" ] && [ "${{ secrets.GPG_PASSPHRASE }}" != "" ]; then
+            gpg --detach-sign --armor repodata/repomd.xml
+          fi
+          cd ../..
+
+      - name: Upload repository
+        uses: actions/upload-artifact@v4
+        with:
+          name: repository-${{ github.sha }}
+          path: repo/
+          retention-days: 90
+
+      - name: Publish repository to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./repo
+          publish_branch: gh-pages 

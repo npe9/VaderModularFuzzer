@@ -1,0 +1,6 @@
+vadermodularfuzzer (0.0.3) unstable; urgency=medium
+
+  * Initial release.
+  * Basic package structure and dependencies.
+
+ -- Draper Laboratory <vadermodularfuzzer@draper.com>  Wed, 09 Apr 2025 12:18:00 +0000 

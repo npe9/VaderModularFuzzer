@@ -1,16 +1,17 @@
-CC ?= afl-clang-fast
+CC = cc
+CFLAGS = -Wall
+TARGET = magicbytes
+TARGET_CMPLOG = magicbytes_cmplog
 
 .PHONY: all clean
 
-all: magicbytes magicbytes_cmplog
+all: $(TARGET) $(TARGET_CMPLOG)
 
-magicbytes: magicbytes.c Makefile
-	echo "Using compiler: $(CC)"
-	$(CC) magicbytes.c -o magicbytes
+$(TARGET): magicbytes.c
+	$(CC) $(CFLAGS) $< -o $@
 
-magicbytes_cmplog: magicbytes.c Makefile
-	echo "Using compiler: $(CC)"
-	AFL_LLVM_CMPLOG=1 $(CC) magicbytes.c -o magicbytes_cmplog
+$(TARGET_CMPLOG): magicbytes.c
+	AFL_LLVM_CMPLOG=1 $(CC) $(CFLAGS) $< -o $@
 
 clean:
-	rm magicbytes magicbytes_cmplog
+	rm -f $(TARGET) $(TARGET_CMPLOG)
