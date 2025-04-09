@@ -1,25 +1,25 @@
 #!/usr/bin/make -f
 
 %:
-	dh $@ --with python3
+	dh $@
 
 override_dh_auto_configure:
 	dh_auto_configure -- \
-		-DCMAKE_INSTALL_PREFIX=/usr \
 		-DCMAKE_BUILD_TYPE=Release \
-		-DPYTHON_SITE_PACKAGES=/usr/lib/python3/dist-packages
+		-DCMAKE_INSTALL_PREFIX=/usr
 
 override_dh_auto_build:
-	dh_auto_build --parallel
-	dh_auto_build -- doc
+	dh_auto_build
 
 override_dh_auto_install:
 	dh_auto_install
-	dh_install --fail-missing
-	dh_installchangelogs
-	dh_installdocs
-	dh_installman
-	dh_python3
+	install -d debian/vadermodularfuzzer/usr/share/doc/vadermodularfuzzer
+	install -m 644 README.md debian/vadermodularfuzzer/usr/share/doc/vadermodularfuzzer/
+	install -m 644 LICENSE debian/vadermodularfuzzer/usr/share/doc/vadermodularfuzzer/
+
+override_dh_auto_test:
+	# Add test commands here if needed
+	true
 
 override_dh_auto_clean:
 	dh_auto_clean

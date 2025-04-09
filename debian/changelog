@@ -1,5 +1,6 @@
-vadermodularfuzzer (1.0.0-1) unstable; urgency=medium
+vadermodularfuzzer (0.0.3) unstable; urgency=medium
 
   * Initial release.
+  * Basic package structure and dependencies.
 
- -- VMF Team <vmf@draper.com>  $(date -R) 
+ -- Draper Laboratory <vadermodularfuzzer@draper.com>  $(date -R) 
