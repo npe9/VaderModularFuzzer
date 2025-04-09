@@ -10,6 +10,10 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: vadermodularfuzzer
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   build-and-publish:
     name: Build and Publish
